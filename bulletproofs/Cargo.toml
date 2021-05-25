@@ -1,0 +1,10 @@
+[package]
+name = "zkp-example-bulletproofs"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+bulletproofs = { git = "https://github.com/dalek-cryptography/bulletproofs", branch = "develop", features = ["yoloproofs", "std"] }
+curve25519-dalek = "3.1.0"
+merlin = "2"
+rand = "0.7"
