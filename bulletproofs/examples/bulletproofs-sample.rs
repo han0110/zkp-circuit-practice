@@ -5,12 +5,20 @@ use curve25519_dalek::scalar::Scalar;
 use merlin::Transcript;
 use rand;
 
-// SampleProof checks whether y = x^3 + x + 5
+// SampleProof checks whether y = x^3 + x + 5 with committed V = (x, y).
+// The linear combination weights in paper's notation will be:
+//                            ┌      ┐  ┌     ┐  ┌     ┐  ┌      ┐  ┌    ┐
+//                            │ 1  0 │  │ 0 0 │  │ 0 0 │  │  1 0 │  │  0 │
+//                            │ 0  0 │  │ 1 0 │  │ 0 0 │  │  1 0 │  │  0 │
+// (W_L, W_R, W_O, W_V, c) = (│ 0 -1 │, │ 0 0 │, │ 1 0 │, │  0 0 │, │  0 │)
+//                            │ 0  0 │  │ 0 1 │  │ 0 0 │  │  1 0 │  │  0 │
+//                            │ 0  0 │  │ 0 0 │  │ 0 1 │  │ -1 1 │  │ -5 │
+//                            └      ┘  └     ┘  └     ┘  └      ┘  └    ┘
 struct SampleProof(R1CSProof);
 
 impl SampleProof {
     fn gadget<CS: ConstraintSystem>(cs: &mut CS, &x: &Variable, &y: &Variable) {
-        let (one, five) = (Scalar::one(), Scalar::from(5u32));
+        let (one, five) = (Scalar::one(), Scalar::from(5u8));
 
         // x^2 = x * x
         let x_square = cs.multiply(x * one, x * one).2;
@@ -66,7 +74,7 @@ fn main() {
 
     // valid proof
     {
-        let (x, y) = (Scalar::from(3u64), Scalar::from(35u64));
+        let (x, y) = (Scalar::from(3u8), Scalar::from(35u8));
 
         let (proof, input_commitments, output_commitments) = {
             let mut prover_transcript = Transcript::new(b"SampleProof");
@@ -87,7 +95,7 @@ fn main() {
 
     // invalid proof
     {
-        let (x, y) = (Scalar::from(3u64), Scalar::from(10u64));
+        let (x, y) = (Scalar::from(3u8), Scalar::from(10u8));
 
         let (proof, input_commitments, output_commitments) = {
             let mut prover_transcript = Transcript::new(b"SampleProof");
