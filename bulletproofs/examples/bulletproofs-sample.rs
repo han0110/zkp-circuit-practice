@@ -68,49 +68,31 @@ impl SampleProof {
     }
 }
 
+macro_rules! run {
+    ($x:expr, $y:expr, $pc_gens:expr, $bp_gens:expr, $ok_or_err_fn:ident) => {{
+        let (x, y) = (Scalar::from($x as u64), Scalar::from($y as u64));
+
+        let mut prover_transcript = Transcript::new(b"SampleProof");
+        let (proof, x_com, y_com) =
+            SampleProof::prove($pc_gens, $bp_gens, &mut prover_transcript, &x, &y).unwrap();
+
+        let mut verifier_transcript = Transcript::new(b"SampleProof");
+        assert!(proof
+            .verify($pc_gens, $bp_gens, &mut verifier_transcript, &x_com, &y_com)
+            .$ok_or_err_fn());
+    }};
+}
+
 fn main() {
     let pc_gens = PedersenGens::default();
     let bp_gens = BulletproofGens::new(1 << 3, 1);
 
-    // valid proof
-    {
-        let (x, y) = (Scalar::from(3u8), Scalar::from(35u8));
-
-        let (proof, input_commitments, output_commitments) = {
-            let mut prover_transcript = Transcript::new(b"SampleProof");
-            SampleProof::prove(&pc_gens, &bp_gens, &mut prover_transcript, &x, &y).unwrap()
-        };
-
-        let mut verifier_transcript = Transcript::new(b"SampleProof");
-        assert!(proof
-            .verify(
-                &pc_gens,
-                &bp_gens,
-                &mut verifier_transcript,
-                &input_commitments,
-                &output_commitments
-            )
-            .is_ok());
-    }
-
-    // invalid proof
-    {
-        let (x, y) = (Scalar::from(3u8), Scalar::from(10u8));
-
-        let (proof, input_commitments, output_commitments) = {
-            let mut prover_transcript = Transcript::new(b"SampleProof");
-            SampleProof::prove(&pc_gens, &bp_gens, &mut prover_transcript, &x, &y).unwrap()
-        };
-
-        let mut verifier_transcript = Transcript::new(b"SampleProof");
-        assert!(proof
-            .verify(
-                &pc_gens,
-                &bp_gens,
-                &mut verifier_transcript,
-                &input_commitments,
-                &output_commitments
-            )
-            .is_err());
-    }
+    // valid proofs
+    run!(1, 7, &pc_gens, &bp_gens, is_ok);
+    run!(3, 35, &pc_gens, &bp_gens, is_ok);
+    run!(5, 135, &pc_gens, &bp_gens, is_ok);
+    // invalid proofs
+    run!(1, 8, &pc_gens, &bp_gens, is_err);
+    run!(3, 36, &pc_gens, &bp_gens, is_err);
+    run!(5, 134, &pc_gens, &bp_gens, is_err);
 }
