@@ -5,7 +5,7 @@ use curve25519_dalek::scalar::Scalar;
 use merlin::Transcript;
 use rand;
 
-// SampleProof checks whether y = x^3 + x + 5 with committed V = (x, y).
+// SampleClaim claims y = x^3 + x + 5 with committed V = (x, y).
 // The linear combination weights in paper's notation will be:
 //                            ┌      ┐  ┌     ┐  ┌     ┐  ┌      ┐  ┌    ┐
 //                            │ 1  0 │  │ 0 0 │  │ 0 0 │  │  1 0 │  │  0 │
@@ -14,9 +14,9 @@ use rand;
 //                            │ 0  0 │  │ 0 1 │  │ 0 0 │  │  1 0 │  │  0 │
 //                            │ 0  0 │  │ 0 0 │  │ 0 1 │  │ -1 1 │  │ -5 │
 //                            └      ┘  └     ┘  └     ┘  └      ┘  └    ┘
-struct SampleProof(R1CSProof);
+struct SampleClaim(R1CSProof);
 
-impl SampleProof {
+impl SampleClaim {
     fn gadget<CS: ConstraintSystem>(cs: &mut CS, &x: &Variable, &y: &Variable) {
         let (one, five) = (Scalar::one(), Scalar::from(5u8));
 
@@ -34,7 +34,7 @@ impl SampleProof {
         transcript: &'a mut Transcript,
         x: &Scalar,
         y: &Scalar,
-    ) -> Result<(SampleProof, CompressedRistretto, CompressedRistretto), R1CSError> {
+    ) -> Result<(SampleClaim, CompressedRistretto, CompressedRistretto), R1CSError> {
         let mut prover = Prover::new(&pc_gens, transcript);
 
         let mut blinding_rng = rand::thread_rng();
@@ -42,11 +42,11 @@ impl SampleProof {
         let (x_com, x_var) = prover.commit(*x, Scalar::random(&mut blinding_rng));
         let (y_com, y_var) = prover.commit(*y, Scalar::random(&mut blinding_rng));
 
-        SampleProof::gadget(&mut prover, &x_var, &y_var);
+        SampleClaim::gadget(&mut prover, &x_var, &y_var);
 
         let proof = prover.prove(&bp_gens)?;
 
-        Ok((SampleProof(proof), x_com, y_com))
+        Ok((SampleClaim(proof), x_com, y_com))
     }
 
     pub fn verify<'a, 'b>(
@@ -62,7 +62,7 @@ impl SampleProof {
         let x_var = verifier.commit(*x_com);
         let y_var = verifier.commit(*y_com);
 
-        SampleProof::gadget(&mut verifier, &x_var, &y_var);
+        SampleClaim::gadget(&mut verifier, &x_var, &y_var);
 
         verifier.verify(&self.0, &pc_gens, &bp_gens)
     }
@@ -72,11 +72,11 @@ macro_rules! run {
     ($x:expr, $y:expr, $pc_gens:expr, $bp_gens:expr, $ok_or_err_fn:ident) => {{
         let (x, y) = (Scalar::from($x as u64), Scalar::from($y as u64));
 
-        let mut prover_transcript = Transcript::new(b"SampleProof");
+        let mut prover_transcript = Transcript::new(b"SampleClaim");
         let (proof, x_com, y_com) =
-            SampleProof::prove($pc_gens, $bp_gens, &mut prover_transcript, &x, &y).unwrap();
+            SampleClaim::prove($pc_gens, $bp_gens, &mut prover_transcript, &x, &y).unwrap();
 
-        let mut verifier_transcript = Transcript::new(b"SampleProof");
+        let mut verifier_transcript = Transcript::new(b"SampleClaim");
         assert!(proof
             .verify($pc_gens, $bp_gens, &mut verifier_transcript, &x_com, &y_com)
             .$ok_or_err_fn());
