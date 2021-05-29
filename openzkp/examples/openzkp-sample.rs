@@ -22,12 +22,14 @@ impl Verifiable for SampleClaim {
             (trace_nrows, trace_ncolumns),
             self.y.as_montgomery().to_bytes_be().to_vec(),
             vec![
-                // x * x - x^2 = 0
+                // T[0][0] * T[0][0] - T[0][1] = 0 (x * x - x^2 = 0)
                 (Trace(0, 0) * Trace(0, 0) - Trace(1, 0)) * on_row(0),
-                // x^2 * x - x^3 = 0
+                // T[0][1] * T[0][0] - T[1][0] = 0 (x^2 * x - x^3 = 0)
                 (Trace(0, 0) * Trace(1, 0) - Trace(0, 1)) * on_row(0),
-                // x^3 + x + 5 - y = 0
+                // T[1][0] + T[0][0] + 5 - T[1][1] = 0 (x^3 + x + 5 - y = 0)
                 (Trace(0, 1) + Trace(0, 0) + Constant(5.into()) - Trace(1, 1)) * on_row(0),
+                // T[1][1] - y = 0 (boundary condition)
+                (Trace(1, 0) - Constant(self.y.clone())) * on_row(1),
             ],
         )
         .unwrap();
@@ -45,8 +47,8 @@ impl Provable<&FieldElement> for SampleClaim {
 
         trace[(0, 0)] = x.clone();
         trace[(0, 1)] = x_square;
-        trace[(1, 0)] = x_cubic;
-        trace[(1, 1)] = self.y.clone();
+        trace[(1, 0)] = x_cubic.clone();
+        trace[(1, 1)] = x_cubic + x + FieldElement::from(5);
 
         trace
     }
