@@ -12,7 +12,9 @@ use halo2::{
     circuit::{layouter::SingleChipLayouter, Layouter},
     dev::{MockProver, VerifyFailure},
     pasta::Fp,
-    plonk::{Advice, Assignment, Circuit, Column, ConstraintSystem, Error, Fixed, Selector},
+    plonk::{
+        Advice, Assignment, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, Selector,
+    },
     poly::Rotation,
 };
 use std::{marker::PhantomData, usize};
@@ -43,7 +45,10 @@ impl<F: FieldExt, const R: usize> MonotoneConfig<F, R> {
             let mi_prev = meta.query_advice(config.value, Rotation::prev());
             let mi_cur = meta.query_advice(config.value, Rotation::cur());
             let table = meta.query_fixed(config.table, Rotation::cur());
-            vec![(q_lookup * (mi_cur - mi_prev), table)]
+            vec![(
+                q_lookup.clone() * (mi_cur - mi_prev) + (Expression::Constant(F::one()) - q_lookup), // default to 1 when q_lookup is disabled
+                table,
+            )]
         });
 
         config
@@ -51,16 +56,17 @@ impl<F: FieldExt, const R: usize> MonotoneConfig<F, R> {
 
     fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         layouter.assign_region(
-            || "table_idx",
-            |mut gate| {
-                // We generate the row values lazily (we only need them during keygen).
-                for index in 0..R {
-                    gate.assign_fixed(
-                        || "table",
-                        self.table,
-                        index,
-                        || Ok(F::from_u64(index as u64)),
-                    )?;
+            || "table",
+            |mut region| {
+                // generate range table [1, R-1]
+                for idx in 0..R.next_power_of_two() {
+                    let to = if idx > 0 && idx < R {
+                        F::from_u64(idx as u64)
+                    } else {
+                        // padding with 1
+                        F::one()
+                    };
+                    region.assign_fixed(|| "table", self.table, idx, || Ok(to))?;
                 }
                 Ok(())
             },
@@ -132,19 +138,27 @@ fn try_test_circuit<F: FieldExt, const R: usize>(
 }
 
 fn main() {
+    assert_eq!(try_test_circuit::<Fp, 100>(vec![1, 2, 15, 30, 129]), Ok(()));
     assert_eq!(
-        try_test_circuit::<Fp, 10000>(vec![1, 2, 500, 1500, 11499]),
+        try_test_circuit::<Fp, 100>(vec![501, 502, 515, 530, 629]),
         Ok(())
     );
     assert_eq!(
-        try_test_circuit::<Fp, 10000>(vec![1, 2, 500, 1500, 11500]),
+        try_test_circuit::<Fp, 100>(vec![1, 1, 15, 30, 129]),
+        Err(vec![VerifyFailure::Lookup {
+            lookup_index: 0,
+            row: 1
+        }])
+    );
+    assert_eq!(
+        try_test_circuit::<Fp, 100>(vec![1, 2, 15, 30, 130]),
         Err(vec![VerifyFailure::Lookup {
             lookup_index: 0,
             row: 4
         }])
     );
     assert_eq!(
-        try_test_circuit::<Fp, 10000>(vec![1, 2, 500, 11499, 1500]),
+        try_test_circuit::<Fp, 100>(vec![1, 2, 15, 129, 30]),
         Err(vec![
             VerifyFailure::Lookup {
                 lookup_index: 0,
