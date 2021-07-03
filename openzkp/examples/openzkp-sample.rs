@@ -65,7 +65,7 @@ macro_rules! run {
     }};
 }
 
-pub fn main() {
+fn main() {
     // valid proofs
     run!(1, 7, is_ok);
     run!(3, 35, is_ok);
