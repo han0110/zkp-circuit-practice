@@ -8,7 +8,7 @@ use halo2::{
     },
     poly::Rotation,
 };
-use std::{array, convert::TryInto, marker::PhantomData};
+use std::{convert::TryInto, marker::PhantomData, mem::swap};
 use zkp_example_halo2::{
     gadget::is_zero::{IsZeroChip, IsZeroConfig, IsZeroInstruction},
     lookup_error_at,
@@ -50,32 +50,25 @@ impl Comparator {
         }
     }
 
-    fn lookup<const B: usize>(&self, a: u8, b: u8, c_in: u8) -> u8 {
+    fn lookup<const B: usize>(&self, mut a: u8, mut b: u8, c_in: u8) -> u8 {
         match c_in {
             0 | 1 => c_in,
             2 => {
                 if a == b {
                     2
                 } else {
+                    if matches!(self, Comparator::GT | Comparator::SGT) {
+                        swap(&mut a, &mut b)
+                    }
                     match self {
-                        Comparator::LT => (a < b) as u8,
-                        Comparator::GT => (a > b) as u8,
-                        Comparator::SLT => {
+                        Comparator::LT | Comparator::GT => (a < b) as u8,
+                        Comparator::SLT | Comparator::SGT => {
                             if a >= (1 << B - 1) && b < (1 << B - 1) {
                                 1
                             } else if b >= (1 << B - 1) && a < (1 << B - 1) {
                                 0
                             } else {
                                 (a < b) as u8
-                            }
-                        }
-                        Comparator::SGT => {
-                            if a >= (1 << B - 1) && b < (1 << B - 1) {
-                                0
-                            } else if b >= (1 << B - 1) && a < (1 << B - 1) {
-                                1
-                            } else {
-                                (a > b) as u8
                             }
                         }
                     }
@@ -96,6 +89,9 @@ impl<F: FieldExt> From<Comparator> for Expression<F> {
 struct Limbs<const B: usize>([u8; 5]);
 
 impl<const B: usize> Limbs<B> {
+    const MAX_UNSIGNED: u8 = (1 << B) - 1;
+    const MAX_LIMB: u8 = 1 << 5 * B;
+
     fn cmp(&self, rhs: &Self, comparator: Comparator) -> Self {
         let mut results = Limbs::default();
 
@@ -110,14 +106,14 @@ impl<const B: usize> Limbs<B> {
 
 impl<const B: usize> From<u64> for Limbs<B> {
     fn from(n: u64) -> Self {
-        assert!(n < 1 << 5 * B);
+        assert!((n as u8) < Limbs::<B>::MAX_LIMB);
 
         Self([
-            (n & ((1 << B) - 1)) as u8,
-            (n >> B & ((1 << B) - 1)) as u8,
-            (n >> 2 * B & ((1 << B) - 1)) as u8,
-            (n >> 3 * B & ((1 << B) - 1)) as u8,
-            (n >> 4 * B & ((1 << B) - 1)) as u8,
+            n as u8 & Limbs::<B>::MAX_UNSIGNED,
+            (n >> B) as u8 & Limbs::<B>::MAX_UNSIGNED,
+            (n >> 2 * B) as u8 & Limbs::<B>::MAX_UNSIGNED,
+            (n >> 3 * B) as u8 & Limbs::<B>::MAX_UNSIGNED,
+            (n >> 4 * B) as u8 & Limbs::<B>::MAX_UNSIGNED,
         ])
     }
 }
@@ -136,8 +132,6 @@ pub struct MultiLimbCmpChip<F, const B: usize> {
 }
 
 impl<F: FieldExt, const B: usize> MultiLimbCmpChip<F, B> {
-    const MAX_UNSIGNED: u8 = (1 << B) - 1;
-
     // Layout of a region (the region `load_witness` will assign)
     // +----------+---------+--------------+--------------+--------------+--------------+
     // | q_enable | advice1 |   advice2    |   advice3    |   advice4    |   advice5    |
@@ -179,7 +173,7 @@ impl<F: FieldExt, const B: usize> MultiLimbCmpChip<F, B> {
 
         let mut lookup =
             |range,
-             fixed_c_in: Option<Expression<F>>,
+             c_in_fixed: Option<Expression<F>>,
              conditions: Vec<(Comparator, Comparator, bool)>| {
                 for idx in range {
                     meta.lookup(|meta| {
@@ -195,50 +189,42 @@ impl<F: FieldExt, const B: usize> MultiLimbCmpChip<F, B> {
                         // witness
                         let a = meta.query_advice(values[idx], Rotation(-3));
                         let b = meta.query_advice(values[idx], Rotation(-2));
-                        let c_in = fixed_c_in
+                        let c_in = c_in_fixed
                             .clone()
                             .unwrap_or_else(|| meta.query_advice(values[idx + 1], Rotation(-1)));
                         let c_out = meta.query_advice(values[idx], Rotation(-1));
 
-                        // synthetic selector
-                        let zero = Expression::Constant(F::zero());
-                        let (tag, a, b, c_in, c_out) = conditions.iter().fold(
-                            (
-                                zero.clone(),
-                                zero.clone(),
-                                zero.clone(),
-                                zero.clone(),
-                                zero.clone(),
-                            ),
-                            |accum, (tag_comparator, comparator, swap)| {
-                                let is_zero_expression =
-                                    is_zeros[*comparator as usize].is_zero_expression.clone();
-                                let tag =
-                                    Expression::Constant(F::from_u64(tag_comparator.tag(idx == 0)));
+                        // synthetic lookup
+                        let mut synthetics = vec![Expression::Constant(F::zero()); 5];
+                        for (tag_comparator, comparator, swap) in &conditions {
+                            let is_zero_expression =
+                                is_zeros[*comparator as usize].is_zero_expression.clone();
 
-                                (
-                                    accum.0 + tag * is_zero_expression.clone(),
-                                    accum.1
-                                        + if *swap { b.clone() } else { a.clone() }
-                                            * is_zero_expression.clone(),
-                                    accum.2
-                                        + if *swap { a.clone() } else { b.clone() }
-                                            * is_zero_expression.clone(),
-                                    accum.3 + c_in.clone() * is_zero_expression.clone(),
-                                    accum.4 + c_out.clone() * is_zero_expression,
-                                )
-                            },
-                        );
+                            synthetics = synthetics
+                                .into_iter()
+                                .zip([
+                                    // tag
+                                    Expression::Constant(F::from_u64(tag_comparator.tag(idx == 0))),
+                                    // a (or b if GT | SGT)
+                                    if *swap { b.clone() } else { a.clone() },
+                                    // b (or a if GT | SGT)
+                                    if *swap { a.clone() } else { b.clone() },
+                                    // c_in or c_in_fixed for highest column
+                                    c_in.clone(),
+                                    // c_out
+                                    c_out.clone(),
+                                ])
+                                .map(|(synthetic, poly)| {
+                                    synthetic + poly * is_zero_expression.clone()
+                                })
+                                .collect();
+                        }
 
-                        array::IntoIter::new([
-                            (tag, ttag),
-                            (a, ta),
-                            (b, tb),
-                            (c_in, tc_in),
-                            (c_out, tc_out),
-                        ])
-                        .map(move |(poly, table)| (q_enable.clone() * poly, table))
-                        .collect()
+                        synthetics
+                            .into_iter()
+                            .zip([ttag, ta, tb, tc_in, tc_out])
+                            .map(|(synthetic, table)| (q_enable.clone() * synthetic, table))
+                            .collect()
                     });
                 }
             };
@@ -296,8 +282,8 @@ impl<F: FieldExt, const B: usize> MultiLimbCmpChip<F, B> {
 
         // LT (2 * 3 * 2^B * 2^B rows)
         for is_final_result in [false, true] {
-            for a in 0..=Self::MAX_UNSIGNED {
-                for b in 0..=Self::MAX_UNSIGNED {
+            for a in 0..=Limbs::<B>::MAX_UNSIGNED {
+                for b in 0..=Limbs::<B>::MAX_UNSIGNED {
                     for c_in in [0, 1, 2] {
                         let mut c_out = Comparator::LT.lookup::<B>(a, b, c_in);
 
@@ -319,8 +305,8 @@ impl<F: FieldExt, const B: usize> MultiLimbCmpChip<F, B> {
         }
 
         // SLT (2^B * 2^B rows)
-        for a in 0..=Self::MAX_UNSIGNED {
-            for b in 0..=Self::MAX_UNSIGNED {
+        for a in 0..=Limbs::<B>::MAX_UNSIGNED {
+            for b in 0..=Limbs::<B>::MAX_UNSIGNED {
                 assign_fixed(
                     F::from_u64(Comparator::SLT.tag(false)),
                     F::from_u64(a as u64),
