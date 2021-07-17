@@ -15,6 +15,7 @@ use halo2::{
     plonk::{Advice, Assignment, Circuit, Column, ConstraintSystem, Error, Expression, Fixed},
     poly::Rotation,
 };
+use zkp_example_halo2::lookup_error_at;
 use std::{marker::PhantomData, usize};
 
 #[derive(Clone, Debug)]
@@ -223,10 +224,7 @@ fn main() {
             (2, vec![101, 101, 115, 130, 229]),
             (3, vec![500, 599, 698, 797, 896]),
         ]),
-        Err(vec![VerifyFailure::Lookup {
-            lookup_index: 0,
-            row: 6
-        }])
+        Err(vec![lookup_error_at!(0, 6)])
     );
     assert_eq!(
         try_test_circuit::<Fp, 100>(vec![
@@ -234,10 +232,7 @@ fn main() {
             (2, vec![101, 102, 115, 130, 229]),
             (3, vec![500, 599, 698, 797, 896]),
         ]),
-        Err(vec![VerifyFailure::Lookup {
-            lookup_index: 0,
-            row: 4
-        }])
+        Err(vec![lookup_error_at!(0, 4)])
     );
     assert_eq!(
         try_test_circuit::<Fp, 100>(vec![
@@ -245,15 +240,9 @@ fn main() {
             (2, vec![101, 102, 115, 130, 229]),
             (3, vec![500, 599, 698, 896, 797]),
         ]),
-        Err(vec![
-            VerifyFailure::Lookup {
-                lookup_index: 0,
-                row: 13
-            },
-            VerifyFailure::Lookup {
-                lookup_index: 0,
-                row: 14
-            }
+        Err(vec![lookup_error_at!(0, 13)
+            ,
+            lookup_error_at!(0, 14)
         ])
     );
 }

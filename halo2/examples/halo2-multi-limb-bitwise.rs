@@ -1,10 +1,7 @@
 use halo2::{
     arithmetic::FieldExt,
     circuit::{layouter::SingleChipLayouter, Layouter, Region},
-    dev::{
-        MockProver,
-        VerifyFailure::{self, Lookup},
-    },
+    dev::{MockProver, VerifyFailure},
     pasta::pallas::Base,
     plonk::{
         Advice, Assignment, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, Selector,
@@ -12,6 +9,7 @@ use halo2::{
     poly::Rotation,
 };
 use std::{array, marker::PhantomData};
+use zkp_example_halo2::lookup_error_at;
 
 #[derive(Clone, Debug)]
 pub(crate) struct MultiLimbBitwiseConfig {
@@ -252,15 +250,6 @@ fn try_test_circuit(witnesses: Vec<(u64, [(u64, u64, u64); 4])>) -> Result<(), V
 
     let prover = MockProver::run(8, &circuit, vec![]).unwrap();
     prover.verify()
-}
-
-macro_rules! lookup_error_at {
-    ($lookup_index:expr, $row:expr) => {
-        Lookup {
-            lookup_index: $lookup_index,
-            row: $row,
-        }
-    };
 }
 
 fn main() {

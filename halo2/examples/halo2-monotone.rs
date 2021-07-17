@@ -18,6 +18,7 @@ use halo2::{
     poly::Rotation,
 };
 use std::{marker::PhantomData, usize};
+use zkp_example_halo2::lookup_error_at;
 
 #[derive(Clone, Debug)]
 struct MonotoneConfig<F: FieldExt, const R: usize> {
@@ -145,29 +146,14 @@ fn main() {
     );
     assert_eq!(
         try_test_circuit::<Fp, 100>(vec![1, 1, 15, 30, 129]),
-        Err(vec![VerifyFailure::Lookup {
-            lookup_index: 0,
-            row: 1
-        }])
+        Err(vec![lookup_error_at!(0, 1)])
     );
     assert_eq!(
         try_test_circuit::<Fp, 100>(vec![1, 2, 15, 30, 130]),
-        Err(vec![VerifyFailure::Lookup {
-            lookup_index: 0,
-            row: 4
-        }])
+        Err(vec![lookup_error_at!(0, 4)])
     );
     assert_eq!(
         try_test_circuit::<Fp, 100>(vec![1, 2, 15, 129, 30]),
-        Err(vec![
-            VerifyFailure::Lookup {
-                lookup_index: 0,
-                row: 3
-            },
-            VerifyFailure::Lookup {
-                lookup_index: 0,
-                row: 4
-            }
-        ])
+        Err(vec![lookup_error_at!(0, 3), lookup_error_at!(0, 4)])
     );
 }
