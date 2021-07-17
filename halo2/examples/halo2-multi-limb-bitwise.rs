@@ -8,19 +8,23 @@ use halo2::{
     },
     poly::Rotation,
 };
-use std::{array, marker::PhantomData};
-use zkp_example_halo2::lookup_error_at;
+use std::{convert::TryInto, marker::PhantomData};
+use zkp_example_halo2::{
+    gadget::is_zero::{IsZeroChip, IsZeroConfig, IsZeroInstruction},
+    lookup_error_at,
+};
 
 #[derive(Clone, Debug)]
-pub(crate) struct MultiLimbBitwiseConfig {
+pub(crate) struct MultiLimbBitwiseConfig<F> {
     pub q_enable: Selector,
     pub values: [Column<Advice>; 4],
     pub tables: [Column<Fixed>; 4],
+    pub is_zeros: [IsZeroConfig<F>; 3],
 }
 
 pub(crate) struct MultiLimbBitwiseChip<F> {
-    config: MultiLimbBitwiseConfig,
-    _marker: PhantomData<F>,
+    config: MultiLimbBitwiseConfig<F>,
+    is_zero_chips: [IsZeroChip<F>; 3],
 }
 
 impl<F: FieldExt> MultiLimbBitwiseChip<F> {
@@ -33,7 +37,7 @@ impl<F: FieldExt> MultiLimbBitwiseChip<F> {
     // |        0 | c1      | c2           | c3           | c4           |
     // |        1 | op      | inv0(op - 1) | inv0(op - 2) | inv0(op - 3) |
     // +----------+---------+--------------+--------------+--------------+
-    fn configure(meta: &mut ConstraintSystem<F>) -> MultiLimbBitwiseConfig {
+    fn configure(meta: &mut ConstraintSystem<F>) -> MultiLimbBitwiseConfig<F> {
         let q_enable = meta.selector();
         let values = [
             meta.advice_column(), // [a1, b1, c1,           op] in a row
@@ -47,49 +51,46 @@ impl<F: FieldExt> MultiLimbBitwiseChip<F> {
             meta.fixed_column(), // b
             meta.fixed_column(), // c
         ];
+        let is_zeros: [IsZeroConfig<F>; 3] = [1, 2, 3]
+            .iter()
+            .map(|&op| {
+                IsZeroChip::configure(
+                    meta,
+                    q_enable,
+                    |meta| {
+                        meta.query_advice(values[0], Rotation::cur())
+                            - Expression::Constant(F::from_u64(op as u64))
+                    },
+                    values[op],
+                )
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
 
-        let one = Expression::Constant(F::one());
-
-        let is_equal =
-            |target_op, op: Expression<F>, op_diff_inv| -> (Expression<F>, Expression<F>) {
-                let diff = op - Expression::Constant(F::from_u64(target_op as u64));
-                (diff.clone(), one.clone() - diff * op_diff_inv)
-            };
-
-        for (target_op, name) in [(1, "and gate"), (2, "or gate"), (3, "xor gate")] {
-            meta.create_gate(name, |meta| {
-                let q_enable = meta.query_selector(q_enable);
-                let op = meta.query_advice(values[0], Rotation::cur());
-                let op_diff_inv = meta.query_advice(values[target_op], Rotation::cur());
-
-                // check op_diff_inv is valid
-                let (diff, is_equal_expression) =
-                    is_equal(target_op, op.clone(), op_diff_inv.clone());
-                array::IntoIter::new([diff, op_diff_inv])
-                    .map(move |poly| q_enable.clone() * is_equal_expression.clone() * poly)
-            });
-
+        for op in [1, 2, 3] {
             for value in values.iter() {
                 meta.lookup(|meta| {
                     let q_enable = meta.query_selector(q_enable);
-                    let op = meta.query_advice(values[0], Rotation::cur());
-                    let op_diff_inv = meta.query_advice(values[target_op], Rotation::cur());
-                    let tag = meta.query_fixed(tables[0], Rotation::cur());
+
+                    // table
+                    let ttag = meta.query_fixed(tables[0], Rotation::cur());
                     let ta = meta.query_fixed(tables[1], Rotation::cur());
                     let tb = meta.query_fixed(tables[2], Rotation::cur());
                     let tc = meta.query_fixed(tables[3], Rotation::cur());
+
+                    // witness
                     let a = meta.query_advice(*value, Rotation(-3));
                     let b = meta.query_advice(*value, Rotation(-2));
                     let c = meta.query_advice(*value, Rotation(-1));
 
                     // use synthetic selector
-                    let q_op_enable = q_enable * is_equal(target_op, op, op_diff_inv).1;
+                    let q_op_enable = q_enable * is_zeros[op - 1].is_zero_expression.clone();
 
                     vec![
                         (
-                            q_op_enable.clone()
-                                * Expression::Constant(F::from_u64(target_op as u64)),
-                            tag,
+                            q_op_enable.clone() * Expression::Constant(F::from_u64(op as u64)),
+                            ttag,
                         ),
                         (q_op_enable.clone() * a, ta),
                         (q_op_enable.clone() * b, tb),
@@ -103,12 +104,12 @@ impl<F: FieldExt> MultiLimbBitwiseChip<F> {
             q_enable,
             values,
             tables,
+            is_zeros,
         }
     }
 
     fn load_table(&self, region: &mut Region<'_, F>, offset: usize) -> Result<(), Error> {
-        let tags = [F::from_u64(1), F::from_u64(2), F::from_u64(3)];
-        let ops = [
+        let op_fns = [
             |a, b| a & b, // and
             |a, b| a | b, // or
             |a, b| a ^ b, // xor
@@ -116,14 +117,14 @@ impl<F: FieldExt> MultiLimbBitwiseChip<F> {
         let mut offset = offset;
 
         // add
-        for (idx, op) in ops.iter().enumerate() {
+        for (idx, op_fn) in op_fns.iter().enumerate() {
             for a in 0..2 {
                 for b in 0..2 {
                     region.assign_fixed(
                         || "table tag",
                         self.config.tables[0],
                         offset,
-                        || Ok(tags[idx]),
+                        || Ok(F::from_u64(idx as u64 + 1)),
                     )?;
                     region.assign_fixed(
                         || "table a",
@@ -141,7 +142,7 @@ impl<F: FieldExt> MultiLimbBitwiseChip<F> {
                         || "table c",
                         self.config.tables[3],
                         offset,
-                        || Ok(F::from_u64(op(a, b))),
+                        || Ok(F::from_u64(op_fn(a, b))),
                     )?;
                     offset += 1;
                 }
@@ -156,26 +157,24 @@ impl<F: FieldExt> MultiLimbBitwiseChip<F> {
         offset: usize,
         witness: (u64, [(u64, u64, u64); 4]),
     ) -> Result<(), Error> {
-        let (op, values) = witness;
         self.config.q_enable.enable(region, offset)?;
+        let (op, values) = witness;
+
+        // witness op and op_diff_inverse
         region.assign_advice(
             || "witness op",
             self.config.values[0],
             offset,
             || Ok(F::from_u64(op)),
         )?;
-        for target_op in [1, 2, 3] {
-            region.assign_advice(
-                || "witness op_diff_inv",
-                self.config.values[target_op],
+        for (is_zero_chip, fixed_op) in self.is_zero_chips.iter().zip([1, 2, 3]) {
+            is_zero_chip.is_zero(
+                region,
                 offset,
-                || {
-                    Ok((F::from_u64(op) - F::from_u64(target_op as u64))
-                        .invert()
-                        .unwrap_or(F::zero()))
-                },
+                Some(F::from_u64(op) - F::from_u64(fixed_op)),
             )?;
         }
+
         for (idx, (a, b, c)) in values.iter().enumerate() {
             region.assign_advice(
                 || "witness a",
@@ -199,10 +198,17 @@ impl<F: FieldExt> MultiLimbBitwiseChip<F> {
         Ok(())
     }
 
-    pub fn construct(config: MultiLimbBitwiseConfig) -> Self {
+    pub fn construct(config: MultiLimbBitwiseConfig<F>) -> Self {
+        let is_zero_chips = config
+            .is_zeros
+            .iter()
+            .map(|is_zero_config| IsZeroChip::construct(is_zero_config.clone()))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
         MultiLimbBitwiseChip {
             config,
-            _marker: PhantomData,
+            is_zero_chips,
         }
     }
 }
@@ -213,7 +219,7 @@ struct TestCircuit<F: FieldExt> {
 }
 
 impl<F: FieldExt> Circuit<F> for TestCircuit<F> {
-    type Config = MultiLimbBitwiseConfig;
+    type Config = MultiLimbBitwiseConfig<F>;
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         MultiLimbBitwiseChip::configure(meta)
