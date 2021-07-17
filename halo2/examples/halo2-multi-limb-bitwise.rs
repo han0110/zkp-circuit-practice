@@ -14,18 +14,18 @@ use halo2::{
 use std::{array, marker::PhantomData};
 
 #[derive(Clone, Debug)]
-pub(crate) struct SwitchConfig {
+pub(crate) struct MultiLimbBitwiseConfig {
     pub q_enable: Selector,
     pub values: [Column<Advice>; 4],
     pub tables: [Column<Fixed>; 4],
 }
 
-pub(crate) struct SwitchChip<F> {
-    config: SwitchConfig,
+pub(crate) struct MultiLimbBitwiseChip<F> {
+    config: MultiLimbBitwiseConfig,
     _marker: PhantomData<F>,
 }
 
-impl<F: FieldExt> SwitchChip<F> {
+impl<F: FieldExt> MultiLimbBitwiseChip<F> {
     // Layout of a region (the region `load_witness` will assign)
     // +----------+---------+--------------+--------------+--------------+
     // | q_enable | advice1 |   advice2    |   advice3    |   advice4    |
@@ -33,15 +33,15 @@ impl<F: FieldExt> SwitchChip<F> {
     // |        0 | a1      | a2           | a3           | a4           |
     // |        0 | b1      | b2           | b3           | b4           |
     // |        0 | c1      | c2           | c3           | c4           |
-    // |        1 | op      | inv0(1 - op) | inv0(2 - op) | inv0(3 - op) |
+    // |        1 | op      | inv0(op - 1) | inv0(op - 2) | inv0(op - 3) |
     // +----------+---------+--------------+--------------+--------------+
-    fn configure(meta: &mut ConstraintSystem<F>) -> SwitchConfig {
+    fn configure(meta: &mut ConstraintSystem<F>) -> MultiLimbBitwiseConfig {
         let q_enable = meta.selector();
         let values = [
-            meta.advice_column(), // [a1, b1, c1, op] in a row
-            meta.advice_column(), // [a1, b1, c1, inv0(1 - op)] in a row
-            meta.advice_column(), // [a1, b1, c1, inv0(2 - op)] in a row
-            meta.advice_column(), // [a1, b1, c1, inv0(3 - op)] in a row
+            meta.advice_column(), // [a1, b1, c1,           op] in a row
+            meta.advice_column(), // [a1, b1, c1, inv0(op - 1)] in a row
+            meta.advice_column(), // [a1, b1, c1, inv0(op - 2)] in a row
+            meta.advice_column(), // [a1, b1, c1, inv0(op - 3)] in a row
         ];
         let tables = [
             meta.fixed_column(), // tag (and: 1, or: 2, xor: 3)
@@ -53,8 +53,8 @@ impl<F: FieldExt> SwitchChip<F> {
         let one = Expression::Constant(F::one());
 
         let is_equal =
-            |target_op, op, op_diff_inv: Expression<F>| -> (Expression<F>, Expression<F>) {
-                let diff = Expression::Constant(F::from_u64(target_op as u64)) - op;
+            |target_op, op: Expression<F>, op_diff_inv| -> (Expression<F>, Expression<F>) {
+                let diff = op - Expression::Constant(F::from_u64(target_op as u64));
                 (diff.clone(), one.clone() - diff * op_diff_inv)
             };
 
@@ -101,7 +101,7 @@ impl<F: FieldExt> SwitchChip<F> {
             }
         }
 
-        SwitchConfig {
+        MultiLimbBitwiseConfig {
             q_enable,
             values,
             tables,
@@ -172,7 +172,7 @@ impl<F: FieldExt> SwitchChip<F> {
                 self.config.values[target_op],
                 offset,
                 || {
-                    Ok((F::from_u64(target_op as u64) - F::from_u64(op))
+                    Ok((F::from_u64(op) - F::from_u64(target_op as u64))
                         .invert()
                         .unwrap_or(F::zero()))
                 },
@@ -201,8 +201,8 @@ impl<F: FieldExt> SwitchChip<F> {
         Ok(())
     }
 
-    pub fn construct(config: SwitchConfig) -> Self {
-        SwitchChip {
+    pub fn construct(config: MultiLimbBitwiseConfig) -> Self {
+        MultiLimbBitwiseChip {
             config,
             _marker: PhantomData,
         }
@@ -215,15 +215,15 @@ struct TestCircuit<F: FieldExt> {
 }
 
 impl<F: FieldExt> Circuit<F> for TestCircuit<F> {
-    type Config = SwitchConfig;
+    type Config = MultiLimbBitwiseConfig;
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        SwitchChip::configure(meta)
+        MultiLimbBitwiseChip::configure(meta)
     }
 
     fn synthesize(&self, cs: &mut impl Assignment<F>, config: Self::Config) -> Result<(), Error> {
         let mut layouter = SingleChipLayouter::new(cs)?;
-        let chip = SwitchChip::construct(config.clone());
+        let chip = MultiLimbBitwiseChip::construct(config.clone());
 
         let witnesses = self.witnesses.as_ref().ok_or(Error::SynthesisError)?;
 
