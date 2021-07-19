@@ -5,3 +5,6 @@ edition = "2018"
 
 [dependencies]
 halo2 = { git = "https://github.com/zcash/halo2", branch = "main" }
+
+[dev-dependencies]
+enum-iterator = "0.6.0"

@@ -116,7 +116,6 @@ impl<F: FieldExt> MultiLimbBitwiseChip<F> {
         ];
         let mut offset = offset;
 
-        // add
         for (idx, op_fn) in op_fns.iter().enumerate() {
             for a in 0..2 {
                 for b in 0..2 {
@@ -260,12 +259,12 @@ fn try_test_circuit(witnesses: Vec<(u64, [(u64, u64, u64); 4])>) -> Result<(), V
 
 fn main() {
     // and
-    // success
+    // ok
     assert_eq!(
         try_test_circuit(vec![(1, [(0, 0, 0), (0, 1, 0), (1, 0, 0), (1, 1, 1)])]),
         Ok(())
     );
-    // failure
+    // error
     assert_eq!(
         try_test_circuit(vec![(1, [(0, 0, 1), (0, 1, 1), (1, 0, 1), (1, 1, 0)])]),
         Err(vec![
@@ -277,12 +276,12 @@ fn main() {
     );
 
     // or
-    // success
+    // ok
     assert_eq!(
         try_test_circuit(vec![(2, [(0, 0, 0), (0, 1, 1), (1, 0, 1), (1, 1, 1)])]),
         Ok(())
     );
-    // failure
+    // error
     assert_eq!(
         try_test_circuit(vec![(2, [(0, 0, 1), (0, 1, 0), (1, 0, 0), (1, 1, 0)])]),
         Err(vec![
@@ -294,12 +293,12 @@ fn main() {
     );
 
     // xor
-    // success
+    // ok
     assert_eq!(
         try_test_circuit(vec![(3, [(0, 0, 0), (0, 1, 1), (1, 0, 1), (1, 1, 0)])]),
         Ok(())
     );
-    // failure
+    // error
     assert_eq!(
         try_test_circuit(vec![(3, [(0, 0, 1), (0, 1, 0), (1, 0, 0), (1, 1, 1)])]),
         Err(vec![
@@ -311,7 +310,7 @@ fn main() {
     );
 
     // add + or + xor
-    // success
+    // ok
     assert_eq!(
         try_test_circuit(vec![
             (1, [(0, 0, 0), (0, 1, 0), (1, 0, 0), (1, 1, 1)]),
@@ -323,7 +322,7 @@ fn main() {
         ]),
         Ok(())
     );
-    // failure
+    // error
     assert_eq!(
         try_test_circuit(vec![
             (1, [(0, 0, 1), (0, 1, 1), (1, 0, 1), (1, 1, 0)]),

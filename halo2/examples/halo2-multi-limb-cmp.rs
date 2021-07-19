@@ -1,3 +1,4 @@
+use enum_iterator::IntoEnumIterator;
 use halo2::{
     arithmetic::FieldExt,
     circuit::{layouter::SingleChipLayouter, Layouter, Region},
@@ -11,10 +12,10 @@ use halo2::{
 use std::{convert::TryInto, marker::PhantomData, mem::swap};
 use zkp_example_halo2::{
     gadget::is_zero::{IsZeroChip, IsZeroConfig, IsZeroInstruction},
-    lookup_error_at,
+    impl_limbs, lookup_error_at,
 };
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, IntoEnumIterator)]
 enum Comparator {
     LT,
     GT,
@@ -23,15 +24,6 @@ enum Comparator {
 }
 
 impl Comparator {
-    fn values() -> [Self; 4] {
-        [
-            Comparator::LT,
-            Comparator::GT,
-            Comparator::SLT,
-            Comparator::SGT,
-        ]
-    }
-
     fn op(&self) -> u64 {
         *self as u64 + 1
     }
@@ -50,7 +42,7 @@ impl Comparator {
         }
     }
 
-    fn lookup<const B: usize>(&self, mut a: u8, mut b: u8, c_in: u8) -> u8 {
+    fn lookup(&self, mut a: u8, mut b: u8, c_in: u8) -> u8 {
         match c_in {
             0 | 1 => c_in,
             2 => {
@@ -63,9 +55,9 @@ impl Comparator {
                     match self {
                         Comparator::LT | Comparator::GT => (a < b) as u8,
                         Comparator::SLT | Comparator::SGT => {
-                            if a >= (1 << B - 1) && b < (1 << B - 1) {
+                            if a > Limbs::MAX_PER_LIMB / 2 && b <= Limbs::MAX_PER_LIMB / 2 {
                                 1
-                            } else if b >= (1 << B - 1) && a < (1 << B - 1) {
+                            } else if b > Limbs::MAX_PER_LIMB / 2 && a <= Limbs::MAX_PER_LIMB / 2 {
                                 0
                             } else {
                                 (a < b) as u8
@@ -85,38 +77,7 @@ impl<F: FieldExt> From<Comparator> for Expression<F> {
     }
 }
 
-#[derive(Default, Debug)]
-struct Limbs<const B: usize>([u8; 5]);
-
-impl<const B: usize> Limbs<B> {
-    const MAX_UNSIGNED: u8 = (1 << B) - 1;
-    const MAX_LIMB: u8 = 1 << 5 * B;
-
-    fn cmp(&self, rhs: &Self, comparator: Comparator) -> Self {
-        let mut results = Limbs::default();
-
-        results.0[4] = comparator.lookup::<B>(self.0[4], rhs.0[4], 2);
-        for i in [3, 2, 1, 0] {
-            results.0[i] = comparator.lookup::<B>(self.0[i], rhs.0[i], results.0[i + 1]);
-        }
-
-        results
-    }
-}
-
-impl<const B: usize> From<u64> for Limbs<B> {
-    fn from(n: u64) -> Self {
-        assert!((n as u8) < Limbs::<B>::MAX_LIMB);
-
-        Self([
-            n as u8 & Limbs::<B>::MAX_UNSIGNED,
-            (n >> B) as u8 & Limbs::<B>::MAX_UNSIGNED,
-            (n >> 2 * B) as u8 & Limbs::<B>::MAX_UNSIGNED,
-            (n >> 3 * B) as u8 & Limbs::<B>::MAX_UNSIGNED,
-            (n >> 4 * B) as u8 & Limbs::<B>::MAX_UNSIGNED,
-        ])
-    }
-}
+impl_limbs!(Limbs, 5, 2);
 
 #[derive(Clone, Debug)]
 pub struct MultiLimbCmpConfig<F> {
@@ -126,12 +87,12 @@ pub struct MultiLimbCmpConfig<F> {
     pub is_zeros: [IsZeroConfig<F>; 4],
 }
 
-pub struct MultiLimbCmpChip<F, const B: usize> {
+pub struct MultiLimbCmpChip<F> {
     config: MultiLimbCmpConfig<F>,
     is_zero_chips: [IsZeroChip<F>; 4],
 }
 
-impl<F: FieldExt, const B: usize> MultiLimbCmpChip<F, B> {
+impl<F: FieldExt> MultiLimbCmpChip<F> {
     // Layout of a region (the region `load_witness` will assign)
     // +----------+---------+--------------+--------------+--------------+--------------+
     // | q_enable | advice1 |   advice2    |   advice3    |   advice4    |   advice5    |
@@ -157,9 +118,8 @@ impl<F: FieldExt, const B: usize> MultiLimbCmpChip<F, B> {
             meta.fixed_column(), // c_in
             meta.fixed_column(), // c_out
         ];
-        let is_zeros: [IsZeroConfig<F>; 4] = Comparator::values()
-            .iter()
-            .map(|&comparator| {
+        let is_zeros: [IsZeroConfig<F>; 4] = Comparator::into_enum_iter()
+            .map(|comparator| {
                 IsZeroChip::configure(
                     meta,
                     q_enable,
@@ -282,10 +242,10 @@ impl<F: FieldExt, const B: usize> MultiLimbCmpChip<F, B> {
 
         // LT (2 * 3 * 2^B * 2^B rows)
         for is_final_result in [false, true] {
-            for a in 0..=Limbs::<B>::MAX_UNSIGNED {
-                for b in 0..=Limbs::<B>::MAX_UNSIGNED {
+            for a in 0..=Limbs::MAX_PER_LIMB {
+                for b in 0..=Limbs::MAX_PER_LIMB {
                     for c_in in [0, 1, 2] {
-                        let mut c_out = Comparator::LT.lookup::<B>(a, b, c_in);
+                        let mut c_out = Comparator::LT.lookup(a, b, c_in);
 
                         // if is result column but still equal, set c_out to 0
                         if is_final_result && c_in == 2 && c_out == 2 {
@@ -305,15 +265,15 @@ impl<F: FieldExt, const B: usize> MultiLimbCmpChip<F, B> {
         }
 
         // SLT (2^B * 2^B rows)
-        for a in 0..=Limbs::<B>::MAX_UNSIGNED {
-            for b in 0..=Limbs::<B>::MAX_UNSIGNED {
+        for a in 0..=Limbs::MAX_PER_LIMB {
+            for b in 0..=Limbs::MAX_PER_LIMB {
                 assign_fixed(
                     F::from_u64(Comparator::SLT.tag(false)),
                     F::from_u64(a as u64),
                     F::from_u64(b as u64),
                     // c_in always be 2 becasue we only enable them in highest limb lookup
                     F::from_u64(2),
-                    F::from_u64(Comparator::SLT.lookup::<B>(a, b, 2) as u64),
+                    F::from_u64(Comparator::SLT.lookup(a, b, 2) as u64),
                 )?;
             }
         }
@@ -325,16 +285,11 @@ impl<F: FieldExt, const B: usize> MultiLimbCmpChip<F, B> {
         &self,
         region: &mut Region<'_, F>,
         offset: usize,
-        witness: (Comparator, [u8; 5], [u8; 5], Option<[u8; 5]>),
+        witness: (Comparator, Limbs, Limbs, Limbs),
     ) -> Result<(), Error> {
         self.config.q_enable.enable(region, offset)?;
 
         let (comparator, a, b, c) = witness;
-        let a: Limbs<B> = Limbs(a);
-        let b: Limbs<B> = Limbs(b);
-        let c = c
-            .map(|c| Limbs::<B>(c))
-            .unwrap_or_else(|| a.cmp(&b, comparator));
 
         // witness op and op_diff_inverse
         region.assign_advice(
@@ -343,7 +298,8 @@ impl<F: FieldExt, const B: usize> MultiLimbCmpChip<F, B> {
             offset,
             || Ok(F::from_u64(comparator.op())),
         )?;
-        for (is_zero_chip, fixed_comparator) in self.is_zero_chips.iter().zip(Comparator::values())
+        for (is_zero_chip, fixed_comparator) in
+            self.is_zero_chips.iter().zip(Comparator::into_enum_iter())
         {
             is_zero_chip.is_zero(
                 region,
@@ -391,21 +347,22 @@ impl<F: FieldExt, const B: usize> MultiLimbCmpChip<F, B> {
         }
     }
 }
-struct TestCircuit<F: FieldExt, const B: usize> {
-    witnesses: Option<Vec<(Comparator, [u8; 5], [u8; 5], Option<[u8; 5]>)>>,
+
+struct TestCircuit<F: FieldExt> {
+    witnesses: Option<Vec<(Comparator, Limbs, Limbs, Limbs)>>,
     _marker: PhantomData<F>,
 }
 
-impl<F: FieldExt, const B: usize> Circuit<F> for TestCircuit<F, B> {
+impl<F: FieldExt> Circuit<F> for TestCircuit<F> {
     type Config = MultiLimbCmpConfig<F>;
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        MultiLimbCmpChip::<F, B>::configure(meta)
+        MultiLimbCmpChip::<F>::configure(meta)
     }
 
     fn synthesize(&self, cs: &mut impl Assignment<F>, config: Self::Config) -> Result<(), Error> {
         let mut layouter = SingleChipLayouter::new(cs)?;
-        let chip = MultiLimbCmpChip::<F, B>::construct(config.clone());
+        let chip = MultiLimbCmpChip::<F>::construct(config.clone());
 
         let witnesses = self.witnesses.as_ref().ok_or(Error::SynthesisError)?;
 
@@ -426,15 +383,16 @@ impl<F: FieldExt, const B: usize> Circuit<F> for TestCircuit<F, B> {
     }
 }
 
-fn try_test_circuit<const B: usize>(
-    witnesses: Vec<(Comparator, [u8; 5], [u8; 5], Option<[u8; 5]>)>,
+fn try_test_circuit(
+    witnesses: Vec<(Comparator, Limbs, Limbs, Limbs)>,
 ) -> Result<(), Vec<VerifyFailure>> {
-    let circuit: TestCircuit<Base, B> = TestCircuit {
+    let circuit: TestCircuit<Base> = TestCircuit {
         witnesses: Some(witnesses),
         _marker: PhantomData,
     };
 
-    let prover = MockProver::run(2 * B as u32 + 3, &circuit, vec![]).unwrap();
+    let prover =
+        MockProver::run(2 * Limbs::NUM_BITS_PER_LIMB as u32 + 3, &circuit, vec![]).unwrap();
     prover.verify()
 }
 
@@ -442,146 +400,146 @@ fn try_test_circuit<const B: usize>(
 fn main() {
     // LT
     assert_eq!(
-        try_test_circuit::<2>(vec![(
+        try_test_circuit(vec![(
             Comparator::LT,
-            [1, 2, 3, 2, 1],
-            [1, 2, 2, 2, 1],
-            Some([0, 0, 0, 2, 2])
+            Limbs([1, 2, 3, 2, 1]),
+            Limbs([1, 2, 2, 2, 1]),
+            Limbs([0, 0, 0, 2, 2])
         )]),
         Ok(())
     );
     assert_eq!(
-        try_test_circuit::<2>(vec![(
+        try_test_circuit(vec![(
             Comparator::LT,
-            [1, 2, 1, 2, 1],
-            [1, 2, 2, 2, 1],
-            Some([1, 1, 1, 2, 2])
+            Limbs([1, 2, 1, 2, 1]),
+            Limbs([1, 2, 2, 2, 1]),
+            Limbs([1, 1, 1, 2, 2])
         )]),
         Ok(())
     );
 
     // GT
     assert_eq!(
-        try_test_circuit::<2>(vec![(
+        try_test_circuit(vec![(
             Comparator::GT,
-            [1, 2, 3, 2, 1],
-            [1, 2, 2, 2, 1],
-            Some([1, 1, 1, 2, 2])
+            Limbs([1, 2, 3, 2, 1]),
+            Limbs([1, 2, 2, 2, 1]),
+            Limbs([1, 1, 1, 2, 2])
         )]),
         Ok(())
     );
     assert_eq!(
-        try_test_circuit::<2>(vec![(
+        try_test_circuit(vec![(
             Comparator::GT,
-            [1, 2, 1, 2, 1],
-            [1, 2, 2, 2, 1],
-            Some([0, 0, 0, 2, 2])
+            Limbs([1, 2, 1, 2, 1]),
+            Limbs([1, 2, 2, 2, 1]),
+            Limbs([0, 0, 0, 2, 2])
         )]),
         Ok(())
     );
 
     // SLT
     assert_eq!(
-        try_test_circuit::<2>(vec![(
+        try_test_circuit(vec![(
             Comparator::SLT,
-            [1, 2, 3, 2, 3],
-            [1, 2, 2, 2, 3],
-            Some([0, 0, 0, 2, 2])
+            Limbs([1, 2, 3, 2, 3]),
+            Limbs([1, 2, 2, 2, 3]),
+            Limbs([0, 0, 0, 2, 2])
         )]),
         Ok(())
     );
     assert_eq!(
-        try_test_circuit::<2>(vec![(
+        try_test_circuit(vec![(
             Comparator::SLT,
-            [1, 2, 1, 2, 3],
-            [1, 2, 2, 2, 3],
-            Some([1, 1, 1, 2, 2])
+            Limbs([1, 2, 1, 2, 3]),
+            Limbs([1, 2, 2, 2, 3]),
+            Limbs([1, 1, 1, 2, 2])
         )]),
         Ok(())
     );
     assert_eq!(
-        try_test_circuit::<2>(vec![(
+        try_test_circuit(vec![(
             Comparator::SLT,
-            [1, 2, 3, 2, 3],
-            [1, 2, 2, 2, 1],
-            Some([1, 1, 1, 1, 1])
+            Limbs([1, 2, 3, 2, 3]),
+            Limbs([1, 2, 2, 2, 1]),
+            Limbs([1, 1, 1, 1, 1])
         )]),
         Ok(())
     );
     assert_eq!(
-        try_test_circuit::<2>(vec![(
+        try_test_circuit(vec![(
             Comparator::SLT,
-            [1, 2, 1, 2, 1],
-            [1, 2, 2, 2, 3],
-            Some([0, 0, 0, 0, 0])
+            Limbs([1, 2, 1, 2, 1]),
+            Limbs([1, 2, 2, 2, 3]),
+            Limbs([0, 0, 0, 0, 0])
         )]),
         Ok(())
     );
 
     // SGT
     assert_eq!(
-        try_test_circuit::<2>(vec![(
+        try_test_circuit(vec![(
             Comparator::SGT,
-            [1, 2, 3, 2, 3],
-            [1, 2, 2, 2, 3],
-            Some([1, 1, 1, 2, 2])
+            Limbs([1, 2, 3, 2, 3]),
+            Limbs([1, 2, 2, 2, 3]),
+            Limbs([1, 1, 1, 2, 2])
         )]),
         Ok(())
     );
     assert_eq!(
-        try_test_circuit::<2>(vec![(
+        try_test_circuit(vec![(
             Comparator::SGT,
-            [1, 2, 1, 2, 3],
-            [1, 2, 2, 2, 3],
-            Some([0, 0, 0, 2, 2])
+            Limbs([1, 2, 1, 2, 3]),
+            Limbs([1, 2, 2, 2, 3]),
+            Limbs([0, 0, 0, 2, 2])
         )]),
         Ok(())
     );
     assert_eq!(
-        try_test_circuit::<2>(vec![(
+        try_test_circuit(vec![(
             Comparator::SGT,
-            [1, 2, 3, 2, 3],
-            [1, 2, 2, 2, 1],
-            Some([0, 0, 0, 0, 0])
+            Limbs([1, 2, 3, 2, 3]),
+            Limbs([1, 2, 2, 2, 1]),
+            Limbs([0, 0, 0, 0, 0])
         )]),
         Ok(())
     );
     assert_eq!(
-        try_test_circuit::<2>(vec![(
+        try_test_circuit(vec![(
             Comparator::SGT,
-            [1, 2, 1, 2, 1],
-            [1, 2, 2, 2, 3],
-            Some([1, 1, 1, 1, 1])
+            Limbs([1, 2, 1, 2, 1]),
+            Limbs([1, 2, 2, 2, 3]),
+            Limbs([1, 1, 1, 1, 1])
         )]),
         Ok(())
     );
 
     // zero case
-    for comparator in Comparator::values() {
+    for comparator in Comparator::into_enum_iter() {
         assert_eq!(
-            try_test_circuit::<2>(vec![(
+            try_test_circuit(vec![(
                 comparator,
-                [0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0],
-                Some([0, 2, 2, 2, 2])
+                Limbs([0, 0, 0, 0, 0]),
+                Limbs([0, 0, 0, 0, 0]),
+                Limbs([0, 2, 2, 2, 2])
             )]),
             Ok(())
         );
         assert_eq!(
-            try_test_circuit::<2>(vec![(
+            try_test_circuit(vec![(
                 comparator,
-                [0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0],
-                Some([1, 2, 2, 2, 2])
+                Limbs([0, 0, 0, 0, 0]),
+                Limbs([0, 0, 0, 0, 0]),
+                Limbs([1, 2, 2, 2, 2])
             )]),
             Err(vec![lookup_error_at!(0, 4)])
         );
         assert_eq!(
-            try_test_circuit::<2>(vec![(
+            try_test_circuit(vec![(
                 comparator,
-                [0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0],
-                Some([2, 2, 2, 2, 2])
+                Limbs([0, 0, 0, 0, 0]),
+                Limbs([0, 0, 0, 0, 0]),
+                Limbs([2, 2, 2, 2, 2])
             )]),
             Err(vec![lookup_error_at!(0, 4)])
         );
