@@ -314,15 +314,14 @@ dependencies = [
 [[package]]
 name = "halo2"
 version = "0.0.1"
-source = "git+https://github.com/zcash/halo2?branch=main#ffe87e1fefc25c3fad7ea3c7ca66ddf3de1df1bb"
+source = "git+https://github.com/zcash/halo2.git?rev=4283713ec76051eaf21a06d0279fa7d3497cafb6#4283713ec76051eaf21a06d0279fa7d3497cafb6"
 dependencies = [
  "blake2b_simd",
- "crossbeam-utils",
  "ff",
  "group",
- "num_cpus",
  "pasta_curves",
  "rand 0.8.3",
+ "rayon",
 ]
 
 [[package]]

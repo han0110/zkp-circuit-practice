@@ -125,10 +125,10 @@ mod test {
     use super::{IsZeroChip, IsZeroConfig, IsZeroInstruction};
     use halo2::{
         arithmetic::FieldExt,
-        circuit::{layouter::SingleChipLayouter, Layouter},
-        dev::{MockProver, VerifyFailure::Constraint},
+        circuit::{Layouter, SimpleFloorPlanner},
+        dev::{MockProver, VerifyFailure::ConstraintNotSatisfied},
         pasta::pallas::Base,
-        plonk::{Advice, Assignment, Circuit, Column, ConstraintSystem, Error},
+        plonk::{Advice, Circuit, Column, ConstraintSystem, Error},
         poly::Rotation,
     };
     use std::marker::PhantomData;
@@ -148,11 +148,8 @@ mod test {
 
     macro_rules! error_constraint_at_row {
         ($row:expr) => {
-            Constraint {
-                gate_index: 1,
-                gate_name: "check is_zero",
-                constraint_index: 0,
-                constraint_name: "",
+            ConstraintNotSatisfied {
+                constraint: ((1, "check is_zero").into(), 0, "").into(),
                 row: $row,
             }
         };
@@ -167,6 +164,7 @@ mod test {
             is_zero: IsZeroConfig<F>,
         }
 
+        #[derive(Default)]
         struct TestCircuit<F: FieldExt> {
             values: Option<Vec<u64>>,
             // checks[i] = is_zero(values[i + 1] - values[i])
@@ -176,6 +174,11 @@ mod test {
 
         impl<F: FieldExt> Circuit<F> for TestCircuit<F> {
             type Config = TestCircuitConfig<F>;
+            type FloorPlanner = SimpleFloorPlanner;
+
+            fn without_witnesses(&self) -> Self {
+                Self::default()
+            }
 
             fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
                 let q_enable = meta.selector();
@@ -214,10 +217,9 @@ mod test {
 
             fn synthesize(
                 &self,
-                cs: &mut impl Assignment<F>,
                 config: Self::Config,
+                mut layouter: impl Layouter<F>,
             ) -> Result<(), Error> {
-                let mut layouter = SingleChipLayouter::new(cs)?;
                 let chip = IsZeroChip::construct(config.is_zero.clone());
 
                 let values: Vec<_> = self
@@ -310,6 +312,7 @@ mod test {
             is_zero: IsZeroConfig<F>,
         }
 
+        #[derive(Default)]
         struct TestCircuit<F: FieldExt> {
             values: Option<Vec<(u64, u64)>>,
             // checks[i] = is_zero(values[i].0 - values[i].1)
@@ -319,6 +322,11 @@ mod test {
 
         impl<F: FieldExt> Circuit<F> for TestCircuit<F> {
             type Config = TestCircuitConfig<F>;
+            type FloorPlanner = SimpleFloorPlanner;
+
+            fn without_witnesses(&self) -> Self {
+                Self::default()
+            }
 
             fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
                 let q_enable = meta.selector();
@@ -358,10 +366,9 @@ mod test {
 
             fn synthesize(
                 &self,
-                cs: &mut impl Assignment<F>,
                 config: Self::Config,
+                mut layouter: impl Layouter<F>,
             ) -> Result<(), Error> {
-                let mut layouter = SingleChipLayouter::new(cs)?;
                 let chip = IsZeroChip::construct(config.is_zero.clone());
 
                 let values: Vec<_> = self

@@ -1,12 +1,12 @@
+// TODO: use smarter encoding to narrow down table size
+
 use enum_iterator::IntoEnumIterator;
 use halo2::{
     arithmetic::FieldExt,
-    circuit::{layouter::SingleChipLayouter, Layouter, Region},
+    circuit::{Layouter, Region, SimpleFloorPlanner},
     dev::{MockProver, VerifyFailure},
     pasta::pallas::Base,
-    plonk::{
-        Advice, Assignment, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, Selector,
-    },
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, Selector},
     poly::Rotation,
 };
 use std::{convert::TryInto, marker::PhantomData, mem::swap};
@@ -348,6 +348,7 @@ impl<F: FieldExt> MultiLimbCmpChip<F> {
     }
 }
 
+#[derive(Default)]
 struct TestCircuit<F: FieldExt> {
     witnesses: Option<Vec<(Comparator, Limbs, Limbs, Limbs)>>,
     _marker: PhantomData<F>,
@@ -355,13 +356,21 @@ struct TestCircuit<F: FieldExt> {
 
 impl<F: FieldExt> Circuit<F> for TestCircuit<F> {
     type Config = MultiLimbCmpConfig<F>;
+    type FloorPlanner = SimpleFloorPlanner;
+
+    fn without_witnesses(&self) -> Self {
+        Self::default()
+    }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         MultiLimbCmpChip::<F>::configure(meta)
     }
 
-    fn synthesize(&self, cs: &mut impl Assignment<F>, config: Self::Config) -> Result<(), Error> {
-        let mut layouter = SingleChipLayouter::new(cs)?;
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        mut layouter: impl Layouter<F>,
+    ) -> Result<(), Error> {
         let chip = MultiLimbCmpChip::<F>::construct(config.clone());
 
         let witnesses = self.witnesses.as_ref().ok_or(Error::SynthesisError)?;
