@@ -10,7 +10,7 @@ use halo2::{
     poly::Rotation,
 };
 use std::{convert::TryInto, marker::PhantomData, mem::swap};
-use zkp_example_halo2::{
+use zkp_circuit_practice_halo2::{
     gadget::is_zero::{IsZeroChip, IsZeroConfig, IsZeroInstruction},
     impl_limbs, lookup_error_at,
 };

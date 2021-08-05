@@ -1,6 +1,7 @@
 [workspace]
 members = [
+  "arkwork",
   "bulletproofs",
   "halo2",
-  "openzkp"
+  "openzkp",
 ]

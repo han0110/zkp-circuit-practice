@@ -1,5 +1,5 @@
 [package]
-name = "zkp-example-halo2"
+name = "zkp-circuit-practice-halo2"
 version = "0.1.0"
 edition = "2018"
 
