@@ -68,7 +68,11 @@ impl<F: FieldExt> IsZeroChip<F> {
             // value_inv ⋅ (1 - value ⋅ value_inv)
             let poly2 = value_inv * is_zero_expression.clone();
 
-            array::IntoIter::new([poly1, poly2]).map(move |poly| q_enable.clone() * poly)
+            array::IntoIter::new([
+                ("value ⋅ (1 - value ⋅ value_inv)", poly1),
+                ("value_inv ⋅ (1 - value ⋅ value_inv)", poly2),
+            ])
+            .map(move |(name, poly)| (name, q_enable.clone() * poly))
         });
 
         IsZeroConfig::<F> {
@@ -100,7 +104,7 @@ impl<F: FieldExt> IsZeroInstruction<F> for IsZeroChip<F> {
             || "witness inverse of value",
             config.value_inv,
             offset,
-            || value_invert.ok_or(Error::SynthesisError),
+            || value_invert.ok_or(Error::Synthesis),
         )?;
 
         Ok(())
@@ -128,29 +132,29 @@ mod test {
         circuit::{Layouter, SimpleFloorPlanner},
         dev::{MockProver, VerifyFailure::ConstraintNotSatisfied},
         pasta::pallas::Base,
-        plonk::{Advice, Circuit, Column, ConstraintSystem, Error},
+        plonk::{Advice, Any, Circuit, Column, ConstraintSystem, Error},
         poly::Rotation,
     };
     use std::marker::PhantomData;
 
     macro_rules! try_test_circuit {
         ($values:expr, $checks:expr, $result:expr) => {{
-            let k = usize::BITS - $values.len().leading_zeros();
             let circuit = TestCircuit::<Base> {
                 values: Some($values),
                 checks: Some($checks),
                 _marker: PhantomData,
             };
-            let prover = MockProver::<Base>::run(k, &circuit, vec![]).unwrap();
+            let prover = MockProver::<Base>::run(4, &circuit, vec![]).unwrap();
             assert_eq!(prover.verify(), $result);
         }};
     }
 
     macro_rules! error_constraint_at_row {
-        ($row:expr) => {
+        ($row:expr, $cell_values:expr) => {
             ConstraintNotSatisfied {
                 constraint: ((1, "check is_zero").into(), 0, "").into(),
                 row: $row,
+                cell_values: $cell_values,
             }
         };
     }
@@ -226,8 +230,8 @@ mod test {
                     .values
                     .as_ref()
                     .map(|values| values.iter().map(|value| F::from_u64(*value)).collect())
-                    .ok_or(Error::SynthesisError)?;
-                let checks = self.checks.as_ref().ok_or(Error::SynthesisError)?;
+                    .ok_or(Error::Synthesis)?;
+                let checks = self.checks.as_ref().ok_or(Error::Synthesis)?;
                 let (first_value, values) = values.split_at(1);
                 let first_value = first_value[0];
 
@@ -284,20 +288,44 @@ mod test {
             vec![1, 2, 3, 4, 5],
             vec![true, true, true, true],
             Err(vec![
-                error_constraint_at_row!(1),
-                error_constraint_at_row!(2),
-                error_constraint_at_row!(3),
-                error_constraint_at_row!(4)
+                error_constraint_at_row!(
+                    1,
+                    vec![(((Any::Advice, 2).into(), 0).into(), "1".to_string())]
+                ),
+                error_constraint_at_row!(
+                    2,
+                    vec![(((Any::Advice, 2).into(), 0).into(), "1".to_string())]
+                ),
+                error_constraint_at_row!(
+                    3,
+                    vec![(((Any::Advice, 2).into(), 0).into(), "1".to_string())]
+                ),
+                error_constraint_at_row!(
+                    4,
+                    vec![(((Any::Advice, 2).into(), 0).into(), "1".to_string())]
+                )
             ])
         );
         try_test_circuit!(
             vec![1, 2, 2, 3, 3],
             vec![true, false, true, false],
             Err(vec![
-                error_constraint_at_row!(1),
-                error_constraint_at_row!(2),
-                error_constraint_at_row!(3),
-                error_constraint_at_row!(4)
+                error_constraint_at_row!(
+                    1,
+                    vec![(((Any::Advice, 2).into(), 0).into(), "1".to_string())]
+                ),
+                error_constraint_at_row!(
+                    2,
+                    vec![(((Any::Advice, 2).into(), 0).into(), "0".to_string())]
+                ),
+                error_constraint_at_row!(
+                    3,
+                    vec![(((Any::Advice, 2).into(), 0).into(), "1".to_string())]
+                ),
+                error_constraint_at_row!(
+                    4,
+                    vec![(((Any::Advice, 2).into(), 0).into(), "0".to_string())]
+                )
             ])
         );
     }
@@ -382,8 +410,8 @@ mod test {
                             })
                             .collect()
                     })
-                    .ok_or(Error::SynthesisError)?;
-                let checks = self.checks.as_ref().ok_or(Error::SynthesisError)?;
+                    .ok_or(Error::Synthesis)?;
+                let checks = self.checks.as_ref().ok_or(Error::Synthesis)?;
 
                 layouter.assign_region(
                     || "witness",
@@ -436,18 +464,36 @@ mod test {
             vec![(1, 2), (3, 4), (5, 6)],
             vec![true, true, true],
             Err(vec![
-                error_constraint_at_row!(1),
-                error_constraint_at_row!(2),
-                error_constraint_at_row!(3),
+                error_constraint_at_row!(
+                    1,
+                    vec![(((Any::Advice, 3).into(), 0).into(), "1".to_string())]
+                ),
+                error_constraint_at_row!(
+                    2,
+                    vec![(((Any::Advice, 3).into(), 0).into(), "1".to_string())]
+                ),
+                error_constraint_at_row!(
+                    3,
+                    vec![(((Any::Advice, 3).into(), 0).into(), "1".to_string())]
+                ),
             ])
         );
         try_test_circuit!(
             vec![(1, 1), (3, 4), (6, 6)],
             vec![false, true, false],
             Err(vec![
-                error_constraint_at_row!(1),
-                error_constraint_at_row!(2),
-                error_constraint_at_row!(3),
+                error_constraint_at_row!(
+                    1,
+                    vec![(((Any::Advice, 3).into(), 0).into(), "0".to_string())]
+                ),
+                error_constraint_at_row!(
+                    2,
+                    vec![(((Any::Advice, 3).into(), 0).into(), "1".to_string())]
+                ),
+                error_constraint_at_row!(
+                    3,
+                    vec![(((Any::Advice, 3).into(), 0).into(), "0".to_string())]
+                ),
             ])
         );
     }

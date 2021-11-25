@@ -314,26 +314,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 
 [[package]]
-name = "enum-iterator"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c79a6321a1197d7730510c7e3f6cb80432dfefecb32426de8cea0aa19b4bb8d7"
-dependencies = [
- "enum-iterator-derive",
-]
-
-[[package]]
-name = "enum-iterator-derive"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e94aa31f7c0dc764f57896dc615ddd76fc13b0d5dca7eb6cc5e018a5a09ec06"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "env_logger"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -348,9 +328,9 @@ dependencies = [
 
 [[package]]
 name = "ff"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63eec06c61e487eecf0f7e6e6372e596a81922c28d33e645d6983ca6493a1af0"
+checksum = "b2958d04124b9f27f175eaeb9a9f383d026098aa837eadd8ba22c11f13a05b9e"
 dependencies = [
  "bitvec",
  "rand_core 0.6.2",
@@ -397,9 +377,9 @@ dependencies = [
 
 [[package]]
 name = "group"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c363a5301b8f153d80747126a04b3c82073b9fe3130571a9d170cacdeaf7912"
+checksum = "bc5ac374b108929de78460075f3dc439fa66df9d8fc77e8f12caa5165fcf0c89"
 dependencies = [
  "byteorder",
  "ff",
@@ -409,8 +389,8 @@ dependencies = [
 
 [[package]]
 name = "halo2"
-version = "0.0.1"
-source = "git+https://github.com/zcash/halo2.git?rev=4283713ec76051eaf21a06d0279fa7d3497cafb6#4283713ec76051eaf21a06d0279fa7d3497cafb6"
+version = "0.1.0-beta.1"
+source = "git+https://github.com/zcash/halo2.git#8bfc58b7c76ae83ba5a9ed7ecdfe0ddfd40ed571"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -574,9 +554,9 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "pasta_curves"
-version = "0.1.1"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "179df750e20069669699f537ec0c4bcb248283f45a78b8c66d797fb73dbbb455"
+checksum = "d647d91972bad78120fd61e06b225fcda117805c9bbf17676b51bd03a251278b"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -1069,7 +1049,6 @@ dependencies = [
 name = "zkp-circuit-practice-halo2"
 version = "0.1.0"
 dependencies = [
- "enum-iterator",
  "halo2",
 ]
 
